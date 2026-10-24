@@ -1,33 +1,53 @@
-create table if not exists public.foro (
-  id uuid primary key,
-  user_id uuid not null references auth.users (id) on delete cascade,
-  categoria text not null check (categoria in ('PASTEL', 'GALLETA', 'PAN', 'POSTRE')),
-  nombre text not null,
-  duracion text not null,
-  ingredientes text not null,
-  preparacion text not null,
-  imagen text,
-  created_at timestamptz not null,
-  updated_at timestamptz not null
+-- Habilitar extensión para generación de UUIDs
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 1. Tabla de Usuarios
+CREATE TABLE IF NOT EXISTS public.users (
+  id UUID PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  apellido TEXT NOT NULL,
+  correo TEXT NOT NULL UNIQUE,
+  rol TEXT NOT NULL DEFAULT 'user' CHECK (rol IN ('admin', 'user')),
+  estado TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo', 'inactivo')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-create index if not exists recetas_user_updated_index
-  on public.foro (user_id, updated_at desc);
+-- 2. Tabla Foro (Recetas)
+CREATE TABLE IF NOT EXISTS public.foro (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  categoria TEXT NOT NULL CHECK (categoria IN ('PASTEL', 'GALLETA', 'PAN', 'POSTRE')),
+  nombre TEXT NOT NULL,
+  duracion TEXT NOT NULL,
+  ingredientes TEXT NOT NULL,
+  preparacion TEXT NOT NULL,
+  imagen TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-alter table public.foro enable row level security;
+-- Índice de búsqueda
+CREATE INDEX IF NOT EXISTS idx_foro_user_id ON public.foro(user_id);
 
-create policy "Users can read their recipes"
-  on public.foro for select
-  to authenticated
-  using ((select auth.uid()) = user_id);
+-- --------------------------------------------------------
+-- ACTIVACIÓN Y CONFIGURACIÓN DE RLS (SEGURIDAD)
+-- --------------------------------------------------------
 
-create policy "Users can create their recipes"
-  on public.foro for insert
-  to authenticated
-  with check ((select auth.uid()) = user_id);
+-- Habilitar RLS en las dos tablas
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.foro ENABLE ROW LEVEL SECURITY;
 
-create policy "Users can update their recipes"
-  on public.foro for update
-  to authenticated
-  using ((select auth.uid()) = user_id)
-  with check ((select auth.uid()) = user_id);
+-- Permitir a usuarios autenticados y anónimos leer y escribir en la tabla users
+CREATE POLICY "Permitir todo en users"
+ON public.users
+FOR ALL
+USING (true)
+WITH CHECK (true);
+
+-- Permitir a usuarios autenticados y anónimos leer y escribir en la tabla foro
+CREATE POLICY "Permitir todo en foro"
+ON public.foro
+FOR ALL
+USING (true)
+WITH CHECK (true);

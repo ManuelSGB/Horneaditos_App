@@ -107,6 +107,22 @@ class RecipeService {
     }
 
     final pending = await _database.getPending(userId: user.id);
+    if (pending.isEmpty) {
+      return 0;
+    }
+
+    try {
+      await _upsertRemoteUser(user);
+    } on Exception catch (error, stackTrace) {
+      developer.log(
+        'No se pudo registrar el usuario remoto; no se subirán sus recetas.',
+        name: 'horneaditos.sync',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return 0;
+    }
+
     var uploadedCount = 0;
     for (final recipe in pending) {
       try {
@@ -135,6 +151,8 @@ class RecipeService {
         'Se necesita una sesión de Supabase para restaurar recetas.',
       );
     }
+
+    await _upsertRemoteUser(user);
 
     const pageSize = 1000;
     final rows = <Map<String, dynamic>>[];
@@ -190,6 +208,7 @@ class RecipeService {
   Future<void> _cacheAndRestoreUser(User user) async {
     await _cacheAuthenticatedUser(user);
     try {
+      await _upsertRemoteUser(user);
       await restoreRecipesForCurrentUser();
     } on Exception catch (error, stackTrace) {
       developer.log(
@@ -199,6 +218,24 @@ class RecipeService {
         stackTrace: stackTrace,
       );
     }
+  }
+
+  Future<void> _upsertRemoteUser(User user) async {
+    final email = user.email;
+    if (email == null || email.isEmpty) {
+      throw StateError(
+        'El esquema public.users requiere correo; '
+        'la sesión Supabase debe tener un email.',
+      );
+    }
+
+    final emailName = email.split('@').first;
+    await _client.from('users').upsert({
+      'id': user.id,
+      'nombre': user.userMetadata?['nombre'] as String? ?? emailName,
+      'apellido': user.userMetadata?['apellido'] as String? ?? 'Usuario',
+      'correo': email,
+    }, onConflict: 'id');
   }
 
   Future<bool> _hasNetworkConnection() async {
