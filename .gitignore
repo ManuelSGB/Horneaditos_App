@@ -1,0 +1,31 @@
+# Dart and Flutter generated files
+**/.dart_tool/
+**/build/
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/coverage/
+**/doc/api/
+
+# Flutter platform-generated files
+**/android/local.properties
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/ephemeral/
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+# IDE and operating system files
+**/.idea/
+**/*.iml
+.DS_Store
+Thumbs.db
+
+# Signing credentials and local environment files
+**/key.properties
+**/*.jks
+**/*.keystore
+.env
+.env.*
+!.env.example
