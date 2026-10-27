@@ -13,6 +13,7 @@ export 'src/auth_service.dart';
 export 'src/recipe.dart';
 export 'src/recipe_database.dart';
 export 'src/recipe_service.dart';
+export 'src/user_profile.dart';
 
 class HorneaditosBackend {
   HorneaditosBackend._({

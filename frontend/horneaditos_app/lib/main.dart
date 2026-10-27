@@ -39,9 +39,10 @@ bool _isValidEmail(String email) {
 }
 
 class HorneaditosApp extends StatelessWidget {
-  const HorneaditosApp({super.key, this.authService});
+  const HorneaditosApp({super.key, this.authService, this.recipeRepository});
 
   final AuthService? authService;
+  final RecipeRepository? recipeRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -94,15 +95,23 @@ class HorneaditosApp extends StatelessWidget {
           ),
         ),
       ),
-      home: AuthGate(authService: authService ?? backend.auth),
+      home: AuthGate(
+        authService: authService ?? backend.auth,
+        recipeRepository: recipeRepository ?? backend.recipes,
+      ),
     );
   }
 }
 
 class AuthGate extends StatefulWidget {
-  const AuthGate({required this.authService, super.key});
+  const AuthGate({
+    required this.authService,
+    required this.recipeRepository,
+    super.key,
+  });
 
   final AuthService authService;
+  final RecipeRepository recipeRepository;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -119,7 +128,10 @@ class _AuthGateState extends State<AuthGate> {
       initialData: widget.authService.hasSession,
       builder: (context, snapshot) {
         return snapshot.data == true
-            ? HomePage(authService: widget.authService)
+            ? HomePage(
+                authService: widget.authService,
+                recipeRepository: widget.recipeRepository,
+              )
             : LoginPage(authService: widget.authService);
       },
     );
@@ -414,7 +426,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       controller: _firstNameController,
                       textCapitalization: TextCapitalization.words,
                       decoration: const InputDecoration(
-                        hintText: 'Ej. Manuel',
+                        hintText: 'Ej: Pedro',
                         prefixIcon: Icon(Icons.person_outline_rounded),
                       ),
                       validator: (value) =>
@@ -430,7 +442,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       textCapitalization: TextCapitalization.words,
                       textInputAction: TextInputAction.next,
                       decoration: const InputDecoration(
-                        hintText: 'Ej. Galindo',
+                        hintText: 'Ej: Perez',
                         prefixIcon: Icon(Icons.person_outline_rounded),
                       ),
                       validator: (value) =>
@@ -495,9 +507,14 @@ class _RegisterPageState extends State<RegisterPage> {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({required this.authService, super.key});
+  const HomePage({
+    required this.authService,
+    required this.recipeRepository,
+    super.key,
+  });
 
   final AuthService authService;
+  final RecipeRepository recipeRepository;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -505,7 +522,50 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _categories = const ['Todo', 'FRIOS', 'FRITOS', 'CALIENTES'];
+  final _searchController = TextEditingController();
   String _selectedCategory = 'Todo';
+  late Future<List<Recipe>> _recipesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _recipesFuture = widget.recipeRepository.getForumRecipes();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _reloadRecipes() {
+    final recipesFuture = widget.recipeRepository.getForumRecipes();
+    setState(() {
+      _recipesFuture = recipesFuture;
+    });
+  }
+
+  Future<void> _addRecipe() async {
+    final published = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) =>
+            AddRecipePage(recipeRepository: widget.recipeRepository),
+      ),
+    );
+    if (published == true && mounted) _reloadRecipes();
+  }
+
+  Future<void> _openProfile() async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => ProfilePage(
+          authService: widget.authService,
+          recipeRepository: widget.recipeRepository,
+        ),
+      ),
+    );
+    if (changed == true && mounted) _reloadRecipes();
+  }
 
   Future<void> _signOut() async {
     try {
@@ -536,11 +596,7 @@ class _HomePageState extends State<HomePage> {
                 const Spacer(),
                 IconButton.filledTonal(
                   tooltip: 'Mi perfil',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const ProfilePage(),
-                    ),
-                  ),
+                  onPressed: _openProfile,
                   icon: const Icon(Icons.person_outline_rounded),
                   style: IconButton.styleFrom(
                     backgroundColor: const Color(0xFFF0E6D8),
@@ -568,11 +624,7 @@ class _HomePageState extends State<HomePage> {
             Align(
               alignment: Alignment.centerLeft,
               child: FilledButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const AddRecipePage(),
-                  ),
-                ),
+                onPressed: _addRecipe,
                 icon: const Icon(Icons.add_rounded),
                 label: const Text('Agregar receta'),
                 style: FilledButton.styleFrom(
@@ -583,76 +635,25 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 22),
             TextField(
+              controller: _searchController,
+              onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 hintText: 'Buscar una receta',
                 prefixIcon: const Icon(Icons.search_rounded),
-                suffixIcon: IconButton(
-                  tooltip: 'Filtros',
-                  onPressed: () {},
-                  icon: const Icon(Icons.tune_rounded),
-                ),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Limpiar búsqueda',
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.close_rounded),
+                      ),
               ),
             ),
             const SizedBox(height: 28),
             Text('Categorías', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
-                color: _butter,
-                borderRadius: BorderRadius.circular(22),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'LA RECETA DEL DÍA',
-                          style: TextStyle(
-                            color: _cocoa,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.1,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'Galletas de chocolate',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 6),
-                        const Text('Crujientes por fuera, tiernas por dentro.'),
-                        const SizedBox(height: 14),
-                        const Row(
-                          children: [
-                            Icon(
-                              Icons.schedule_rounded,
-                              size: 16,
-                              color: _cocoa,
-                            ),
-                            SizedBox(width: 5),
-                            Text('45 min', style: TextStyle(color: _cocoa)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  const SizedBox(
-                    width: 76,
-                    height: 92,
-                    child: Icon(Icons.cake_rounded, size: 68, color: _caramel),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 28),
-            Text(
-              '¿Qué se te antoja?',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
             const SizedBox(height: 14),
             SizedBox(
               height: 42,
@@ -691,24 +692,72 @@ class _HomePageState extends State<HomePage> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                TextButton(onPressed: () {}, child: const Text('Ver todas')),
+                IconButton(
+                  tooltip: 'Actualizar foro',
+                  onPressed: _reloadRecipes,
+                  icon: const Icon(Icons.refresh_rounded),
+                ),
               ],
             ),
             const SizedBox(height: 8),
-            const _RecipeRow(
-              title: 'Panqué de limón',
-              subtitle: 'Suave, aromático y recién horneado',
-              time: '25 min',
-              icon: Icons.cookie_rounded,
-              color: Color(0xFFF3DFC9),
-            ),
-            const SizedBox(height: 12),
-            const _RecipeRow(
-              title: 'Pastel de vainilla',
-              subtitle: 'Un clásico para compartir en la mesa',
-              time: '1 h 10 min',
-              icon: Icons.breakfast_dining_rounded,
-              color: Color(0xFFE8E0C8),
+            FutureBuilder<List<Recipe>>(
+              future: _recipesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return Column(
+                    children: [
+                      const Text('No se pudo cargar el foro.'),
+                      TextButton(
+                        key: const ValueKey('home-feed-retry'),
+                        onPressed: _reloadRecipes,
+                        child: const Text('Intentar de nuevo'),
+                      ),
+                    ],
+                  );
+                }
+                final query = _searchController.text.trim().toLowerCase();
+                final recipes = snapshot.data!
+                    .where(
+                      (recipe) =>
+                          (_selectedCategory == 'Todo' ||
+                              recipe.category == _selectedCategory) &&
+                          (query.isEmpty ||
+                              recipe.name.toLowerCase().contains(query) ||
+                              recipe.ingredients.toLowerCase().contains(query)),
+                    )
+                    .toList(growable: false);
+                if (recipes.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 22),
+                    child: Text('Aún no hay recetas que coincidan.'),
+                  );
+                }
+                return Column(
+                  children: [
+                    for (var index = 0; index < recipes.length; index++) ...[
+                      _RecipeRow(
+                        recipe: recipes[index],
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                RecipeDetailPage(recipe: recipes[index]),
+                          ),
+                        ),
+                      ),
+                      if (index != recipes.length - 1)
+                        const SizedBox(height: 12),
+                    ],
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -718,16 +767,12 @@ class _HomePageState extends State<HomePage> {
 }
 
 class AddRecipePage extends StatefulWidget {
-  const AddRecipePage({
-    super.key,
-    this.initialCategory,
-    this.initialName = '',
-    this.isEditing = false,
-  });
+  const AddRecipePage({required this.recipeRepository, super.key, this.recipe});
 
-  final String? initialCategory;
-  final String initialName;
-  final bool isEditing;
+  final RecipeRepository recipeRepository;
+  final Recipe? recipe;
+
+  bool get isEditing => recipe != null;
 
   @override
   State<AddRecipePage> createState() => _AddRecipePageState();
@@ -737,28 +782,78 @@ class _AddRecipePageState extends State<AddRecipePage> {
   static const _categories = ['FRIOS', 'FRITOS', 'CALIENTES'];
 
   final _formKey = GlobalKey<FormState>();
-  late final _nameController = TextEditingController(text: widget.initialName);
+  late final _nameController = TextEditingController(text: widget.recipe?.name);
+  late final _durationController = TextEditingController(
+    text: widget.recipe?.duration,
+  );
+  late final _ingredientsController = TextEditingController(
+    text: widget.recipe?.ingredients,
+  );
+  late final _preparationController = TextEditingController(
+    text: widget.recipe?.preparation,
+  );
+  late final _imageController = TextEditingController(
+    text: widget.recipe?.imageUrl,
+  );
   String? _category;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
     super.initState();
-    _category = widget.initialCategory;
+    _category = widget.recipe?.category;
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _durationController.dispose();
+    _ingredientsController.dispose();
+    _preparationController.dispose();
+    _imageController.dispose();
     super.dispose();
   }
 
-  void _publish() {
-    if (_formKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Esta maqueta no guarda recetas todavía.'),
-        ),
-      );
+  Future<void> _publish() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+
+    setState(() => _isSubmitting = true);
+    final previous = widget.recipe;
+    final recipe = previous == null
+        ? Recipe.create(
+            category: _category!,
+            name: _nameController.text.trim(),
+            duration: _durationController.text.trim(),
+            ingredients: _ingredientsController.text.trim(),
+            preparation: _preparationController.text.trim(),
+            imageUrl: _imageController.text.trim().isEmpty
+                ? null
+                : _imageController.text.trim(),
+          )
+        : previous.copyWith(
+            category: _category!,
+            name: _nameController.text.trim(),
+            duration: _durationController.text.trim(),
+            ingredients: _ingredientsController.text.trim(),
+            preparation: _preparationController.text.trim(),
+            imageUrl: _imageController.text.trim().isEmpty
+                ? null
+                : _imageController.text.trim(),
+            clearImageUrl: _imageController.text.trim().isEmpty,
+            updatedAt: DateTime.now().toUtc(),
+            sincronizado: false,
+          );
+    try {
+      await widget.recipeRepository.saveRecipe(recipe);
+      if (mounted) Navigator.of(context).pop(true);
+    } on Exception catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo guardar la receta: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -773,10 +868,12 @@ class _AddRecipePageState extends State<AddRecipePage> {
             children: [
               const _BrandMark(compact: true),
               const SizedBox(height: 30),
-              const _Eyebrow('AGREGAR RECETA'),
+              _Eyebrow(widget.isEditing ? 'EDITAR RECETA' : 'AGREGAR RECETA'),
               const SizedBox(height: 9),
               Text(
-                'Comparte tu toque especial.',
+                widget.isEditing
+                    ? 'Actualiza tu receta.'
+                    : 'Comparte tu toque especial.',
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 8),
@@ -821,7 +918,7 @@ class _AddRecipePageState extends State<AddRecipePage> {
               const _FieldLabel('Duración'),
               TextFormField(
                 key: const ValueKey('recipe-duration'),
-                keyboardType: TextInputType.number,
+                controller: _durationController,
                 decoration: const InputDecoration(
                   hintText: 'Ej. 25 minutos',
                   prefixIcon: Icon(Icons.schedule_rounded),
@@ -834,6 +931,7 @@ class _AddRecipePageState extends State<AddRecipePage> {
               const _FieldLabel('Ingredientes'),
               TextFormField(
                 key: const ValueKey('recipe-ingredients'),
+                controller: _ingredientsController,
                 minLines: 3,
                 maxLines: 5,
                 decoration: const InputDecoration(
@@ -848,6 +946,7 @@ class _AddRecipePageState extends State<AddRecipePage> {
               const _FieldLabel('Preparación'),
               TextFormField(
                 key: const ValueKey('recipe-preparation'),
+                controller: _preparationController,
                 minLines: 4,
                 maxLines: 7,
                 decoration: const InputDecoration(
@@ -859,32 +958,24 @@ class _AddRecipePageState extends State<AddRecipePage> {
                     : null,
               ),
               const SizedBox(height: 16),
-              const _FieldLabel('Imagen'),
-              OutlinedButton.icon(
-                onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'La carga de imágenes estará disponible más adelante.',
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.add_photo_alternate_outlined),
-                label: const Text('Subir una foto de tu receta'),
-                style: OutlinedButton.styleFrom(
-                  alignment: Alignment.centerLeft,
-                  minimumSize: const Size.fromHeight(70),
-                  foregroundColor: _muted,
-                  backgroundColor: _paper,
-                  side: const BorderSide(color: Color(0xFFE9DFD0)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+              const _FieldLabel('URL de imagen (opcional)'),
+              TextFormField(
+                key: const ValueKey('recipe-image'),
+                controller: _imageController,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  hintText: 'https://ejemplo.com/receta.jpg',
+                  prefixIcon: Icon(Icons.image_outlined),
                 ),
               ),
               const SizedBox(height: 24),
               _PrimaryButton(
-                label: widget.isEditing ? 'Guardar cambios' : 'Publicar',
-                onPressed: _publish,
+                label: _isSubmitting
+                    ? 'Guardando…'
+                    : widget.isEditing
+                    ? 'Guardar cambios'
+                    : 'Publicar',
+                onPressed: _isSubmitting ? null : _publish,
               ),
             ],
           ),
@@ -894,189 +985,437 @@ class _AddRecipePageState extends State<AddRecipePage> {
   }
 }
 
-class ProfilePage extends StatelessWidget {
-  const ProfilePage({super.key});
+class ProfilePage extends StatefulWidget {
+  const ProfilePage({
+    required this.authService,
+    required this.recipeRepository,
+    super.key,
+  });
 
-  void _confirmDelete(BuildContext context) {
-    showDialog<void>(
+  final AuthService authService;
+  final RecipeRepository recipeRepository;
+
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  late Future<(UserProfile, List<Recipe>)> _profileFuture = _loadProfile();
+  bool _hasChanges = false;
+
+  Future<(UserProfile, List<Recipe>)> _loadProfile() async {
+    final profile = await widget.recipeRepository.getCurrentProfile();
+    final recipes = await widget.recipeRepository.getMyRecipes();
+    return (profile, recipes);
+  }
+
+  void _reload() {
+    final profileFuture = _loadProfile();
+    setState(() {
+      _profileFuture = profileFuture;
+    });
+  }
+
+  Future<void> _editRecipe(Recipe recipe) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => AddRecipePage(
+          recipeRepository: widget.recipeRepository,
+          recipe: recipe,
+        ),
+      ),
+    );
+    if (changed == true && mounted) {
+      _hasChanges = true;
+      _reload();
+    }
+  }
+
+  Future<void> _deleteRecipe(Recipe recipe) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('¿Eliminar receta?'),
-        content: const Text(
-          'Esta acción es solo una vista de demostración. No se eliminarán datos.',
-        ),
+        content: Text('Se eliminará "${recipe.name}" de tus publicaciones.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancelar'),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Entendido'),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Eliminar'),
           ),
         ],
       ),
     );
+    if (confirmed != true) return;
+    try {
+      await widget.recipeRepository.deleteRecipe(recipe);
+      if (!mounted) return;
+      _hasChanges = true;
+      _reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Receta eliminada de tu perfil.')),
+      );
+    } on Exception catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('No se pudo eliminar: $error')));
+      }
+    }
+  }
+
+  Future<void> _changePassword() async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _PasswordChangeDialog(
+        updatePassword: widget.authService.updatePassword,
+      ),
+    );
+    if (changed == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('La contraseña se actualizó.')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(22, 18, 22, 30),
-          children: [
-            const _BrandMark(compact: true),
-            const SizedBox(height: 30),
-            const _Eyebrow('PERFIL'),
-            const SizedBox(height: 9),
-            Text(
-              'Tu rincón del recetario.',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Cada receta cuenta una historia. Aquí están las que has compartido con nuestra comunidad.',
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              decoration: const BoxDecoration(
-                border: Border.symmetric(
-                  horizontal: BorderSide(color: Color(0xFFE9DFD0)),
+        child: FutureBuilder<(UserProfile, List<Recipe>)>(
+          future: _profileFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('No se pudo cargar tu perfil.'),
+                    TextButton(
+                      onPressed: _reload,
+                      child: const Text('Intentar de nuevo'),
+                    ),
+                  ],
                 ),
-              ),
-              child: const Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Nombre', style: TextStyle(color: _muted)),
-                        SizedBox(height: 5),
-                        Text(
-                          'Lucía Martín',
-                          style: TextStyle(
-                            color: _cocoa,
-                            fontFamily: 'serif',
-                            fontSize: 23,
-                          ),
-                        ),
-                      ],
+              );
+            }
+            final (profile, recipes) = snapshot.data!;
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(22, 18, 22, 30),
+              children: [
+                Row(
+                  children: [
+                    const _BrandMark(compact: true),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: 'Volver',
+                      onPressed: () => Navigator.of(context).pop(_hasChanges),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 30),
+                const _Eyebrow('PERFIL'),
+                const SizedBox(height: 9),
+                Text(
+                  'Tu rincón del recetario.',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Consulta tus datos y administra las recetas que has compartido.',
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  decoration: const BoxDecoration(
+                    border: Border.symmetric(
+                      horizontal: BorderSide(color: Color(0xFFE9DFD0)),
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                  child: Row(
                     children: [
-                      Text(
-                        'Número de recetas publicadas',
-                        style: TextStyle(color: _muted),
-                      ),
-                      SizedBox(height: 5),
-                      Text(
-                        '1',
-                        style: TextStyle(
-                          color: _caramel,
-                          fontFamily: 'serif',
-                          fontSize: 25,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Nombre',
+                              style: TextStyle(color: _muted),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              profile.fullName,
+                              style: const TextStyle(
+                                color: _cocoa,
+                                fontFamily: 'serif',
+                                fontSize: 23,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              profile.email,
+                              style: const TextStyle(color: _muted),
+                            ),
+                            Text('Rol: ${profile.role}'),
+                            Text('Estado: ${profile.status}'),
+                          ],
                         ),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          const Text(
+                            'Número de recetas publicadas',
+                            textAlign: TextAlign.end,
+                            style: TextStyle(color: _muted),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            '${recipes.length}',
+                            style: const TextStyle(
+                              color: _caramel,
+                              fontFamily: 'serif',
+                              fontSize: 25,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 28),
-            Text(
-              'Recetas publicadas',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: _paper,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFEFE6D9)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Categoría',
-                          style: TextStyle(color: _muted),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'CALIENTES',
-                          style: TextStyle(
-                            color: _cocoa,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        const Text('Nombre', style: TextStyle(color: _muted)),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Galletas de chocolate',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(color: _caramel),
-                        ),
-                        const SizedBox(height: 18),
-                        Wrap(
-                          spacing: 4,
-                          children: [
-                            TextButton.icon(
-                              onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => const AddRecipePage(
-                                    initialCategory: 'CALIENTES',
-                                    initialName: 'Galletas de chocolate',
-                                    isEditing: true,
-                                  ),
-                                ),
-                              ),
-                              icon: const Icon(Icons.edit_outlined, size: 17),
-                              label: const Text('Editar'),
-                            ),
-                            TextButton.icon(
-                              onPressed: () => _confirmDelete(context),
-                              icon: const Icon(Icons.delete_outline, size: 17),
-                              label: const Text('Eliminar'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: _caramel,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const ValueKey('change-password'),
+                    onPressed: _changePassword,
+                    icon: const Icon(Icons.lock_reset_rounded),
+                    label: const Text('Cambiar contraseña'),
                   ),
-                  const SizedBox(width: 12),
-                  Container(
-                    width: 82,
-                    height: 108,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1E4D2),
-                      borderRadius: BorderRadius.circular(12),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Recetas publicadas',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 16),
+                if (recipes.isEmpty)
+                  const Text('Todavía no has publicado recetas.')
+                else
+                  for (final recipe in recipes) ...[
+                    _OwnedRecipeCard(
+                      recipe: recipe,
+                      onEdit: () => _editRecipe(recipe),
+                      onDelete: () => _deleteRecipe(recipe),
                     ),
-                    child: const Icon(
-                      Icons.cookie_rounded,
-                      size: 42,
-                      color: _caramel,
-                    ),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                  ],
+                const SizedBox(height: 8),
+                const Text('Tu toque especial ya forma parte de nuestra mesa.'),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _OwnedRecipeCard extends StatelessWidget {
+  const _OwnedRecipeCard({
+    required this.recipe,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final Recipe recipe;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _paper,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFEFE6D9)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(recipe.category, style: const TextStyle(color: _muted)),
+          const SizedBox(height: 5),
+          Text(
+            recipe.name,
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(color: _caramel),
+          ),
+          const SizedBox(height: 5),
+          Text('Duración: ${recipe.duration}'),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 4,
+            children: [
+              TextButton.icon(
+                key: ValueKey('edit-${recipe.id}'),
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_outlined, size: 17),
+                label: const Text('Editar'),
               ),
+              TextButton.icon(
+                key: ValueKey('delete-${recipe.id}'),
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline, size: 17),
+                label: const Text('Eliminar'),
+                style: TextButton.styleFrom(foregroundColor: _caramel),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PasswordChangeDialog extends StatefulWidget {
+  const _PasswordChangeDialog({required this.updatePassword});
+
+  final Future<void> Function(String password) updatePassword;
+
+  @override
+  State<_PasswordChangeDialog> createState() => _PasswordChangeDialogState();
+}
+
+class _PasswordChangeDialogState extends State<_PasswordChangeDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _passwordController = TextEditingController();
+  final _confirmationController = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _confirmationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_submitting || !_formKey.currentState!.validate()) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.updatePassword(_passwordController.text);
+      if (mounted) Navigator.of(context).pop(true);
+    } on Exception catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Cambiar contraseña'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              key: const ValueKey('new-password'),
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Nueva contraseña'),
+              validator: (value) => value == null || value.length < 6
+                  ? 'Usa al menos 6 caracteres'
+                  : null,
             ),
-            const SizedBox(height: 20),
-            const Text('Tu toque especial ya forma parte de nuestra mesa.'),
+            TextFormField(
+              key: const ValueKey('confirm-password'),
+              controller: _confirmationController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Confirmar contraseña',
+              ),
+              validator: (value) => value != _passwordController.text
+                  ? 'Las contraseñas no coinciden'
+                  : null,
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: const TextStyle(color: Colors.red)),
+            ],
           ],
         ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting
+              ? null
+              : () => Navigator.of(context).pop(false),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: Text(_submitting ? 'Guardando…' : 'Actualizar'),
+        ),
+      ],
+    );
+  }
+}
+
+class RecipeDetailPage extends StatelessWidget {
+  const RecipeDetailPage({required this.recipe, super.key});
+
+  final Recipe recipe;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(recipe.name)),
+      body: ListView(
+        padding: const EdgeInsets.all(22),
+        children: [
+          if (recipe.imageUrl != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: Image.network(
+                recipe.imageUrl!,
+                height: 220,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox(
+                  height: 140,
+                  child: Icon(Icons.cake_rounded, size: 72, color: _caramel),
+                ),
+              ),
+            ),
+          const SizedBox(height: 18),
+          _Eyebrow(recipe.category),
+          const SizedBox(height: 8),
+          Text(recipe.name, style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 8),
+          Text('Duración: ${recipe.duration}'),
+          const SizedBox(height: 24),
+          Text('Ingredientes', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          Text(recipe.ingredients),
+          const SizedBox(height: 24),
+          Text('Preparación', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          Text(recipe.preparation),
+        ],
       ),
     );
   }
@@ -1186,74 +1525,89 @@ class _PrimaryButton extends StatelessWidget {
 }
 
 class _RecipeRow extends StatelessWidget {
-  const _RecipeRow({
-    required this.title,
-    required this.subtitle,
-    required this.time,
-    required this.icon,
-    required this.color,
-  });
+  const _RecipeRow({required this.recipe, required this.onTap});
 
-  final String title;
-  final String subtitle;
-  final String time;
-  final IconData icon;
-  final Color color;
+  final Recipe recipe;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: _paper,
+    return Material(
+      color: _paper,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFEFE6D9)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 66,
-            height: 66,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: _caramel, size: 34),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFEFE6D9)),
           ),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: _cocoa,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
+          child: Row(
+            children: [
+              Container(
+                width: 66,
+                height: 66,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3DFC9),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(height: 4),
-                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-                const SizedBox(height: 5),
-                Text(
-                  time,
-                  style: const TextStyle(
-                    color: _caramel,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: recipe.imageUrl == null
+                    ? const Icon(
+                        Icons.cookie_rounded,
+                        color: _caramel,
+                        size: 34,
+                      )
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          recipe.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const Icon(
+                            Icons.cookie_rounded,
+                            color: _caramel,
+                            size: 34,
+                          ),
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      recipe.name,
+                      style: const TextStyle(
+                        color: _cocoa,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${recipe.category} · ${recipe.ingredients}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      recipe.duration,
+                      style: const TextStyle(
+                        color: _caramel,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: _cocoa),
+            ],
           ),
-          IconButton(
-            tooltip: 'Guardar receta',
-            onPressed: () {},
-            icon: const Icon(Icons.bookmark_border_rounded),
-            color: _cocoa,
-          ),
-        ],
+        ),
       ),
     );
   }

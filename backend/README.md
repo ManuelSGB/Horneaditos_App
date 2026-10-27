@@ -56,9 +56,10 @@ archivos del repositorio ni variables persistentes. La fila debe existir primero
 por el registro en la app. Cierra y vuelve a iniciar sesión para refrescar el rol
 guardado en SQLite; la sesión actual no necesita invalidarse en Supabase.
 
-Al iniciar sesión en un dispositivo nuevo, la app restaura las recetas del
-usuario y las integra con SQLite sin reemplazar cambios locales pendientes.
-El servicio escucha cambios de conectividad y vuelve a intentar la cola local.
+Al iniciar sesión en un dispositivo nuevo, la app restaura el foro público y lo
+integra con SQLite sin reemplazar cambios locales pendientes. El perfil consulta
+solo las recetas del usuario autenticado. El servicio escucha cambios de
+conectividad y vuelve a intentar altas, ediciones y eliminaciones pendientes.
 El esquema remoto esperado es `public.users` y `public.foro`, con los nombres de
 columnas del SQL. Antes de subir recetas, el backend crea o actualiza la fila del
 usuario en `public.users`, requerida por la clave foránea de `foro`. El usuario
@@ -67,8 +68,8 @@ Usa únicamente la clave pública `anon`/publishable; nunca la `service_role`.
 El script inicial que compartiste abría RLS en ambas tablas; por eso es necesario
 aplicar `auth_policies.sql` antes de usar cuentas reales. El acceso a recetas de
 foro queda público de lectura, y las escrituras exigen autenticación y propiedad.
-El campo `imagen` conserva una ruta local y todavía no sube archivos a Supabase
-Storage, por lo que esa imagen no se restaurará en otros dispositivos.
+El formulario guarda en `imagen` una URL pública (si se proporciona), no una ruta
+local ni un archivo cargado a Supabase Storage.
 
 ## API principal
 
@@ -83,6 +84,10 @@ final recipe = Recipe.create(
 
 final saved = await backend.recipes.saveRecipe(recipe);
 final localRecipes = await backend.recipes.getRecipes();
+final forumRecipes = await backend.recipes.getForumRecipes();
+final myRecipes = await backend.recipes.getMyRecipes();
+final profile = await backend.recipes.getCurrentProfile();
+await backend.recipes.deleteRecipe(saved);
 ```
 
 `saveRecipe` persiste primero en SQLite, retorna el registro local y sube la
@@ -92,6 +97,14 @@ permite consultar el estado actualizado. `Recipe.create` genera el identificador
 UUID. Las recetas Supabase pertenecen al usuario autenticado y las políticas RLS
 de `auth_policies.sql` permiten lectura pública del foro y escritura solo al
 propietario autenticado.
+
+`getForumRecipes` actualiza el cache público cuando hay conexión; sin conexión
+devuelve el foro disponible localmente. `getMyRecipes` filtra siempre por el
+usuario actual. Las eliminaciones se guardan en una cola SQLite independiente y
+se retiran de Supabase al recuperar conectividad. El perfil ofrece el resumen de
+la cuenta y `AuthService.updatePassword` cambia la contraseña mediante Supabase
+Auth; las contraseñas nunca se almacenan en SQLite. El formulario acepta una URL
+para la imagen; la subida de archivos requiere configurar un bucket de Storage.
 
 SQLite usa `sqflite`, por lo que este backend está preparado para Android, iOS y
 macOS; web, Windows y Linux requieren un adaptador de base de datos distinto.

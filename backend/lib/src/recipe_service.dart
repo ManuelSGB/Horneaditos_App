@@ -6,8 +6,21 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'recipe.dart';
 import 'recipe_database.dart';
+import 'user_profile.dart';
 
-class RecipeService {
+abstract interface class RecipeRepository {
+  Future<Recipe> saveRecipe(Recipe recipe);
+
+  Future<List<Recipe>> getForumRecipes();
+
+  Future<List<Recipe>> getMyRecipes();
+
+  Future<UserProfile> getCurrentProfile();
+
+  Future<void> deleteRecipe(Recipe recipe);
+}
+
+class RecipeService implements RecipeRepository {
   RecipeService({
     required RecipeDatabase database,
     required SupabaseClient client,
@@ -69,6 +82,7 @@ class RecipeService {
     unawaited(_syncInBackground());
   }
 
+  @override
   Future<Recipe> saveRecipe(Recipe recipe) async {
     final user = _client.auth.currentUser;
     if (user == null) {
@@ -92,6 +106,120 @@ class RecipeService {
     return _database.getAll();
   }
 
+  @override
+  Future<List<Recipe>> getForumRecipes() async {
+    if (await _hasNetworkConnection()) {
+      const pageSize = 1000;
+      final rows = <Map<String, dynamic>>[];
+      try {
+        for (var offset = 0; ; offset += pageSize) {
+          final page = await _client
+              .from(_table)
+              .select()
+              .order('created_at', ascending: false)
+              .range(offset, offset + pageSize - 1);
+          rows.addAll(page);
+          if (page.length < pageSize) break;
+        }
+      } on Exception catch (error, stackTrace) {
+        developer.log(
+          'No se pudo actualizar el foro; se mostrarán las recetas locales.',
+          name: 'horneaditos.forum',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        return _database.getAll();
+      }
+      for (final row in rows) {
+        await _database.mergeRemote(Recipe.fromSupabaseMap(row));
+      }
+    }
+    return _database.getAll();
+  }
+
+  @override
+  Future<List<Recipe>> getMyRecipes() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw StateError('Inicia sesión para consultar tus recetas.');
+    }
+    if (await _hasNetworkConnection()) {
+      const pageSize = 1000;
+      final rows = <Map<String, dynamic>>[];
+      try {
+        for (var offset = 0; ; offset += pageSize) {
+          final page = await _client
+              .from(_table)
+              .select()
+              .eq('user_id', user.id)
+              .order('created_at', ascending: false)
+              .range(offset, offset + pageSize - 1);
+          rows.addAll(page);
+          if (page.length < pageSize) break;
+        }
+      } on Exception catch (error, stackTrace) {
+        developer.log(
+          'No se pudieron actualizar las recetas del perfil; se usará SQLite.',
+          name: 'horneaditos.profile',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        return _database.getByUser(user.id);
+      }
+      for (final row in rows) {
+        await _database.mergeRemote(Recipe.fromSupabaseMap(row));
+      }
+    }
+    return _database.getByUser(user.id);
+  }
+
+  @override
+  Future<UserProfile> getCurrentProfile() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw StateError('Inicia sesión para consultar tu perfil.');
+    }
+    if (await _hasNetworkConnection()) {
+      try {
+        final profile = await _client
+            .from('users')
+            .select('id,nombre,apellido,correo,rol,estado')
+            .eq('id', user.id)
+            .maybeSingle();
+        final remoteProfile = profile ?? await _upsertRemoteUser(user);
+        await _database.cacheRemoteUserProfile(remoteProfile);
+      } on Exception catch (error, stackTrace) {
+        developer.log(
+          'No se pudo actualizar el perfil desde Supabase.',
+          name: 'horneaditos.profile',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        final cachedProfile = await _database.getUserProfile(user.id);
+        if (cachedProfile != null) return cachedProfile;
+        rethrow;
+      }
+    }
+    final cachedProfile = await _database.getUserProfile(user.id);
+    if (cachedProfile == null) {
+      throw StateError('No hay un perfil local disponible para esta sesión.');
+    }
+    return cachedProfile;
+  }
+
+  @override
+  Future<void> deleteRecipe(Recipe recipe) async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw StateError('Inicia sesión para eliminar una receta.');
+    }
+    if (recipe.userId != user.id) {
+      throw StateError('Solo puedes eliminar tus propias recetas.');
+    }
+    await _database.deleteOwnedRecipe(recipeId: recipe.id, userId: user.id);
+    unawaited(_syncInBackground());
+  }
+
   Future<int> syncPending() {
     final next = _syncQueue.then<int>(
       (_) => _syncPending(),
@@ -107,10 +235,32 @@ class RecipeService {
       return 0;
     }
 
+    final pendingDeletions = await _database.getPendingDeletions(
+      userId: user.id,
+    );
     final pending = await _database.getPending(userId: user.id);
-    if (pending.isEmpty) {
+    if (pendingDeletions.isEmpty && pending.isEmpty) {
       return 0;
     }
+
+    for (final deletion in pendingDeletions) {
+      try {
+        await _client
+            .from(_table)
+            .delete()
+            .eq('id', deletion.recipeId)
+            .eq('user_id', deletion.userId);
+        await _database.markDeletionSynchronized(deletion);
+      } on Exception catch (error, stackTrace) {
+        developer.log(
+          'No se pudo sincronizar el borrado ${deletion.recipeId}; seguirá pendiente.',
+          name: 'horneaditos.sync',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+    if (pending.isEmpty) return 0;
 
     try {
       final profile = await _upsertRemoteUser(user);
@@ -163,7 +313,6 @@ class RecipeService {
       final page = await _client
           .from(_table)
           .select()
-          .eq('user_id', user.id)
           .order('id')
           .range(offset, offset + pageSize - 1);
       rows.addAll(page);

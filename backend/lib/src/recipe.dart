@@ -59,6 +59,7 @@ class Recipe {
     String? ingredients,
     String? preparation,
     String? imageUrl,
+    bool clearImageUrl = false,
     DateTime? updatedAt,
     bool? sincronizado,
   }) {
@@ -70,7 +71,7 @@ class Recipe {
       duration: duration ?? this.duration,
       ingredients: ingredients ?? this.ingredients,
       preparation: preparation ?? this.preparation,
-      imageUrl: imageUrl ?? this.imageUrl,
+      imageUrl: clearImageUrl ? null : imageUrl ?? this.imageUrl,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       sincronizado: sincronizado ?? this.sincronizado,

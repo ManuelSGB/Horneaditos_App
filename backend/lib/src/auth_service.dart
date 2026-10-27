@@ -16,6 +16,8 @@ abstract interface class AuthService {
 
   Future<void> resetPassword(String email);
 
+  Future<void> updatePassword(String password);
+
   Future<void> signOut();
 }
 
@@ -58,6 +60,11 @@ class SupabaseAuthService implements AuthService {
   @override
   Future<void> resetPassword(String email) {
     return _client.auth.resetPasswordForEmail(email.trim());
+  }
+
+  @override
+  Future<void> updatePassword(String password) async {
+    await _client.auth.updateUser(UserAttributes(password: password));
   }
 
   @override
