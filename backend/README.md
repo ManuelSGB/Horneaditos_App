@@ -52,7 +52,7 @@ Storage, por lo que esa imagen no se restaurará en otros dispositivos.
 
 ```dart
 final recipe = Recipe.create(
-  category: 'PASTEL',
+  category: 'CALIENTES',
   name: 'Pastel de chocolate',
   duration: '45 minutos',
   ingredients: 'Harina, cacao, azúcar...',
@@ -72,3 +72,5 @@ del SQL compartido actualmente no limitan lectura ni escritura por propietario.
 
 SQLite usa `sqflite`, por lo que este backend está preparado para Android, iOS y
 macOS; web, Windows y Linux requieren un adaptador de base de datos distinto.
+Al actualizar una base local anterior, las recetas cuya categoría ya no existe
+se conservan y pasan a `CALIENTES`; revisa esa categoría después de la migración.

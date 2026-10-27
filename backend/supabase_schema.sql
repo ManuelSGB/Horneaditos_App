@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS public.users (
 CREATE TABLE IF NOT EXISTS public.foro (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE ON UPDATE CASCADE,
-  categoria TEXT NOT NULL CHECK (categoria IN ('PASTEL', 'GALLETA', 'PAN', 'POSTRE')),
+  categoria TEXT NOT NULL CHECK (categoria IN ('FRIOS', 'FRITOS', 'CALIENTES')),
   nombre TEXT NOT NULL,
   duracion TEXT NOT NULL,
   ingredientes TEXT NOT NULL,
@@ -26,6 +26,14 @@ CREATE TABLE IF NOT EXISTS public.foro (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Actualizar la restricción categoria en instalaciones existentes
+ALTER TABLE public.foro
+DROP CONSTRAINT IF EXISTS foro_categoria_check;
+
+ALTER TABLE public.foro
+ADD CONSTRAINT foro_categoria_check
+CHECK (categoria IN ('FRIOS', 'FRITOS', 'CALIENTES'));
 
 -- Índice de búsqueda
 CREATE INDEX IF NOT EXISTS idx_foro_user_id ON public.foro(user_id);

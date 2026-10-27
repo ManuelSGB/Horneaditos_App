@@ -67,7 +67,7 @@ void main() {
     await tester.tap(find.text('Editar'));
     await tester.pumpAndSettle();
 
-    expect(find.text('GALLETA'), findsOneWidget);
+    expect(find.text('CALIENTES'), findsOneWidget);
     expect(
       tester
           .widget<TextFormField>(find.byKey(const ValueKey('recipe-name')))

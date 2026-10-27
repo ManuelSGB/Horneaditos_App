@@ -345,7 +345,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final _categories = const ['Todo', 'Pasteles', 'Galletas', 'Pan dulce'];
+  final _categories = const ['Todo', 'FRIOS', 'FRITOS', 'CALIENTES'];
   String _selectedCategory = 'Todo';
 
   @override
@@ -553,7 +553,7 @@ class AddRecipePage extends StatefulWidget {
 }
 
 class _AddRecipePageState extends State<AddRecipePage> {
-  static const _categories = ['PASTEL', 'GALLETA', 'PAN', 'POSTRE'];
+  static const _categories = ['FRIOS', 'FRITOS', 'CALIENTES'];
 
   final _formKey = GlobalKey<FormState>();
   late final _nameController = TextEditingController(text: widget.initialName);
@@ -831,7 +831,7 @@ class ProfilePage extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         const Text(
-                          'Galletas',
+                          'CALIENTES',
                           style: TextStyle(
                             color: _cocoa,
                             fontWeight: FontWeight.w600,
@@ -853,7 +853,7 @@ class ProfilePage extends StatelessWidget {
                               onPressed: () => Navigator.of(context).push(
                                 MaterialPageRoute<void>(
                                   builder: (_) => const AddRecipePage(
-                                    initialCategory: 'GALLETA',
+                                    initialCategory: 'CALIENTES',
                                     initialName: 'Galletas de chocolate',
                                     isEditing: true,
                                   ),

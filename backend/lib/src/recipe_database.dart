@@ -6,7 +6,7 @@ import 'recipe.dart';
 
 class RecipeDatabase {
   static const _databaseName = 'horneaditos.db';
-  static const _databaseVersion = 2;
+  static const _databaseVersion = 3;
 
   Database? _database;
 
@@ -29,6 +29,9 @@ class RecipeDatabase {
         if (oldVersion < 2) {
           await _createSchema(database);
           await _migrateLegacyRecipes(database);
+        }
+        if (oldVersion < 3) {
+          await _migrateRecipeCategories(database);
         }
       },
     );
@@ -191,7 +194,7 @@ class RecipeDatabase {
       CREATE TABLE IF NOT EXISTS foro (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
-        categoria TEXT NOT NULL CHECK (categoria IN ('PASTEL', 'GALLETA', 'PAN', 'POSTRE')),
+        categoria TEXT NOT NULL CHECK (categoria IN ('FRIOS', 'FRITOS', 'CALIENTES')),
         nombre TEXT NOT NULL,
         duracion TEXT NOT NULL,
         ingredientes TEXT NOT NULL,
@@ -232,11 +235,63 @@ class RecipeDatabase {
         id, user_id, categoria, nombre, duracion, ingredientes,
         preparacion, imagen, created_at, updated_at, sincronizado
       )
-      SELECT id, user_id, category, name, duration, ingredients,
+      SELECT id, user_id,
+        CASE
+          WHEN category IN ('FRIOS', 'FRITOS', 'CALIENTES') THEN category
+          ELSE 'CALIENTES'
+        END,
+        name, duration, ingredients,
         preparation, image_url, created_at, updated_at, sincronizado
       FROM recetas
       WHERE user_id IS NOT NULL
     ''');
+  }
+
+  Future<void> _migrateRecipeCategories(DatabaseExecutor database) async {
+    final tables = await database.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'foro'",
+    );
+    if (tables.isEmpty) {
+      return;
+    }
+
+    await database.execute('DROP INDEX IF EXISTS foro_sync_index');
+    await database.execute('ALTER TABLE foro RENAME TO foro_old_categories');
+    await database.execute('''
+      CREATE TABLE foro (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        categoria TEXT NOT NULL CHECK (categoria IN ('FRIOS', 'FRITOS', 'CALIENTES')),
+        nombre TEXT NOT NULL,
+        duracion TEXT NOT NULL,
+        ingredientes TEXT NOT NULL,
+        preparacion TEXT NOT NULL,
+        imagen TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        sincronizado INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+          ON DELETE CASCADE ON UPDATE CASCADE
+      )
+    ''');
+    await database.execute('''
+      INSERT INTO foro (
+        id, user_id, categoria, nombre, duracion, ingredientes,
+        preparacion, imagen, created_at, updated_at, sincronizado
+      )
+      SELECT id, user_id,
+        CASE
+          WHEN categoria IN ('FRIOS', 'FRITOS', 'CALIENTES') THEN categoria
+          ELSE 'CALIENTES'
+        END,
+        nombre, duracion, ingredientes, preparacion, imagen,
+        created_at, updated_at, sincronizado
+      FROM foro_old_categories
+    ''');
+    await database.execute('DROP TABLE foro_old_categories');
+    await database.execute(
+      'CREATE INDEX foro_sync_index ON foro (sincronizado, user_id)',
+    );
   }
 
   Database _requireDatabase() {
