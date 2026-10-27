@@ -7,19 +7,26 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'src/recipe.dart';
 import 'src/recipe_database.dart';
 import 'src/recipe_service.dart';
+import 'src/auth_service.dart';
 
+export 'src/auth_service.dart';
 export 'src/recipe.dart';
 export 'src/recipe_database.dart';
 export 'src/recipe_service.dart';
 
 class HorneaditosBackend {
-  HorneaditosBackend._({required this.database, required this.recipes});
+  HorneaditosBackend._({
+    required this.database,
+    required this.recipes,
+    required this.auth,
+  });
 
   static HorneaditosBackend? _instance;
   static Future<HorneaditosBackend>? _initializing;
 
   final RecipeDatabase database;
   final RecipeService recipes;
+  final AuthService auth;
 
   static Future<HorneaditosBackend> initialize({
     required String supabaseUrl,
@@ -67,8 +74,13 @@ class HorneaditosBackend {
       connectivity: Connectivity(),
     );
     await recipes.start();
+    final auth = SupabaseAuthService(Supabase.instance.client);
 
-    return HorneaditosBackend._(database: database, recipes: recipes);
+    return HorneaditosBackend._(
+      database: database,
+      recipes: recipes,
+      auth: auth,
+    );
   }
 
   Future<List<Recipe>> restoreRecipesForCurrentUser() {

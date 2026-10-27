@@ -64,11 +64,54 @@ class RecipeDatabase {
       if (existing.isEmpty) {
         await transaction.insert('users', values);
       } else {
+        values.remove('id');
+        values.remove('rol');
+        values.remove('estado');
         await transaction.update(
           'users',
-          values..remove('id'),
+          values,
           where: 'id = ?',
           whereArgs: [user.id],
+        );
+      }
+    });
+  }
+
+  Future<void> cacheRemoteUserProfile(Map<String, dynamic> profile) async {
+    final id = profile['id'] as String;
+    final role = profile['rol'] as String;
+    final status = profile['estado'] as String;
+    if (!const {'admin', 'user'}.contains(role) ||
+        !const {'activo', 'inactivo'}.contains(status)) {
+      throw FormatException('El perfil remoto tiene rol o estado inválido.');
+    }
+
+    final values = <String, Object?>{
+      'nombre': profile['nombre'] as String,
+      'apellido': profile['apellido'] as String,
+      'correo': profile['correo'] as String,
+      'rol': role,
+      'estado': status,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+      'sincronizado': 1,
+    };
+    final database = _requireDatabase();
+    await database.transaction((transaction) async {
+      final existing = await transaction.query(
+        'users',
+        columns: ['id'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (existing.isEmpty) {
+        await transaction.insert('users', {'id': id, ...values});
+      } else {
+        await transaction.update(
+          'users',
+          values,
+          where: 'id = ?',
+          whereArgs: [id],
         );
       }
     });

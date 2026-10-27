@@ -34,8 +34,14 @@ Future<void> main() async {
   runApp(const HorneaditosApp());
 }
 
+bool _isValidEmail(String email) {
+  return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email.trim());
+}
+
 class HorneaditosApp extends StatelessWidget {
-  const HorneaditosApp({super.key});
+  const HorneaditosApp({super.key, this.authService});
+
+  final AuthService? authService;
 
   @override
   Widget build(BuildContext context) {
@@ -88,13 +94,42 @@ class HorneaditosApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const LoginPage(),
+      home: AuthGate(authService: authService ?? backend.auth),
+    );
+  }
+}
+
+class AuthGate extends StatefulWidget {
+  const AuthGate({required this.authService, super.key});
+
+  final AuthService authService;
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  late final Stream<bool> _authStateChanges =
+      widget.authService.authStateChanges;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<bool>(
+      stream: _authStateChanges,
+      initialData: widget.authService.hasSession,
+      builder: (context, snapshot) {
+        return snapshot.data == true
+            ? HomePage(authService: widget.authService)
+            : LoginPage(authService: widget.authService);
+      },
     );
   }
 }
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  const LoginPage({required this.authService, super.key});
+
+  final AuthService authService;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -104,6 +139,7 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
@@ -112,12 +148,56 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void _enterKitchen() {
-    if (_formKey.currentState!.validate()) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const HomePage()),
-      );
+  Future<void> _enterKitchen() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) {
+      return;
     }
+
+    setState(() => _isSubmitting = true);
+    try {
+      await widget.authService.signIn(
+        email: _emailController.text,
+        password: _passwordController.text,
+      );
+    } on AuthException catch (error) {
+      _showMessage(error.message);
+    } on Exception {
+      _showMessage(
+        widget.authService.hasSession
+            ? 'No se pudo validar la conexión. Se conservará la sesión local.'
+            : 'No se pudo iniciar sesión. Revisa tu conexión e inténtalo de nuevo.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    final email = _emailController.text.trim();
+    if (!_isValidEmail(email)) {
+      _showMessage(
+        'Escribe tu correo para enviarte el enlace de recuperación.',
+      );
+      return;
+    }
+
+    try {
+      await widget.authService.resetPassword(email);
+      _showMessage('Si el correo está registrado, recibirás un enlace.');
+    } on AuthException catch (error) {
+      _showMessage(error.message);
+    } on Exception {
+      _showMessage('No se pudo enviar el enlace. Comprueba tu conexión.');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -158,7 +238,7 @@ class _LoginPageState extends State<LoginPage> {
                         prefixIcon: Icon(Icons.alternate_email_rounded),
                       ),
                       validator: (value) {
-                        if (value == null || !value.contains('@')) {
+                        if (!_isValidEmail(value ?? '')) {
                           return 'Escribe un correo válido';
                         }
                         return null;
@@ -171,7 +251,9 @@ class _LoginPageState extends State<LoginPage> {
                       controller: _passwordController,
                       obscureText: true,
                       textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _enterKitchen(),
+                      onFieldSubmitted: (_) {
+                        _enterKitchen();
+                      },
                       decoration: const InputDecoration(
                         hintText: 'Tu contraseña',
                         prefixIcon: Icon(Icons.lock_outline_rounded),
@@ -186,12 +268,15 @@ class _LoginPageState extends State<LoginPage> {
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: () {},
+                        onPressed: _isSubmitting ? null : _resetPassword,
                         child: const Text('¿Olvidaste tu contraseña?'),
                       ),
                     ),
                     const SizedBox(height: 8),
-                    _PrimaryButton(label: 'Ingresar', onPressed: _enterKitchen),
+                    _PrimaryButton(
+                      label: _isSubmitting ? 'Ingresando…' : 'Ingresar',
+                      onPressed: _isSubmitting ? null : _enterKitchen,
+                    ),
                     const SizedBox(height: 24),
                     Wrap(
                       alignment: WrapAlignment.center,
@@ -201,7 +286,8 @@ class _LoginPageState extends State<LoginPage> {
                         TextButton(
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute<void>(
-                              builder: (_) => const RegisterPage(),
+                              builder: (_) =>
+                                  RegisterPage(authService: widget.authService),
                             ),
                           ),
                           child: const Text('Registrarme'),
@@ -220,7 +306,9 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 class RegisterPage extends StatefulWidget {
-  const RegisterPage({super.key});
+  const RegisterPage({required this.authService, super.key});
+
+  final AuthService authService;
 
   @override
   State<RegisterPage> createState() => _RegisterPageState();
@@ -228,14 +316,60 @@ class RegisterPage extends StatefulWidget {
 
 class _RegisterPageState extends State<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isSubmitting = false;
 
-  void _createAccount() {
-    if (_formKey.currentState!.validate()) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => const HomePage()),
-        (route) => false,
-      );
+  @override
+  void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _createAccount() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) {
+      return;
     }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final authenticated = await widget.authService.signUp(
+        firstName: _firstNameController.text,
+        lastName: _lastNameController.text,
+        email: _emailController.text,
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      if (authenticated) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      } else {
+        _showMessage(
+          'Cuenta creada. Inicia sesión cuando tu correo esté confirmado.',
+        );
+      }
+    } on AuthException catch (error) {
+      _showMessage(error.message);
+    } on Exception {
+      _showMessage(
+        'No se pudo crear la cuenta. Revisa los datos y tu conexión.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -274,30 +408,48 @@ class _RegisterPageState extends State<RegisterPage> {
                       'Crea tu cuenta para guardar y compartir tus recetas hechas con cariño.',
                     ),
                     const SizedBox(height: 28),
-                    const _FieldLabel('¿Cómo te llamas?'),
+                    const _FieldLabel('Nombre'),
                     TextFormField(
                       key: const ValueKey('register-name'),
+                      controller: _firstNameController,
                       textCapitalization: TextCapitalization.words,
                       decoration: const InputDecoration(
-                        hintText: 'Tu nombre',
+                        hintText: 'Ej. Manuel',
                         prefixIcon: Icon(Icons.person_outline_rounded),
                       ),
                       validator: (value) =>
                           value == null || value.trim().isEmpty
-                          ? 'Cuéntanos tu nombre'
+                          ? 'Escribe tu nombre'
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                    const _FieldLabel('Apellido'),
+                    TextFormField(
+                      key: const ValueKey('register-last-name'),
+                      controller: _lastNameController,
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        hintText: 'Ej. Galindo',
+                        prefixIcon: Icon(Icons.person_outline_rounded),
+                      ),
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                          ? 'Escribe tu apellido'
                           : null,
                     ),
                     const SizedBox(height: 16),
                     const _FieldLabel('Correo electrónico'),
                     TextFormField(
                       key: const ValueKey('register-email'),
+                      controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.next,
                       decoration: const InputDecoration(
                         hintText: 'hola@ejemplo.com',
                         prefixIcon: Icon(Icons.alternate_email_rounded),
                       ),
-                      validator: (value) =>
-                          value == null || !value.contains('@')
+                      validator: (value) => !_isValidEmail(value ?? '')
                           ? 'Escribe un correo válido'
                           : null,
                     ),
@@ -305,7 +457,12 @@ class _RegisterPageState extends State<RegisterPage> {
                     const _FieldLabel('Crea una contraseña'),
                     TextFormField(
                       key: const ValueKey('register-password'),
+                      controller: _passwordController,
                       obscureText: true,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) {
+                        _createAccount();
+                      },
                       decoration: const InputDecoration(
                         hintText: 'Mínimo 6 caracteres',
                         prefixIcon: Icon(Icons.lock_outline_rounded),
@@ -316,8 +473,8 @@ class _RegisterPageState extends State<RegisterPage> {
                     ),
                     const SizedBox(height: 26),
                     _PrimaryButton(
-                      label: 'Registrarme',
-                      onPressed: _createAccount,
+                      label: _isSubmitting ? 'Creando cuenta…' : 'Registrarme',
+                      onPressed: _isSubmitting ? null : _createAccount,
                     ),
                     const SizedBox(height: 16),
                     Center(
@@ -338,7 +495,9 @@ class _RegisterPageState extends State<RegisterPage> {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({required this.authService, super.key});
+
+  final AuthService authService;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -347,6 +506,22 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _categories = const ['Todo', 'FRIOS', 'FRITOS', 'CALIENTES'];
   String _selectedCategory = 'Todo';
+
+  Future<void> _signOut() async {
+    try {
+      await widget.authService.signOut();
+    } on AuthException catch (error) {
+      _showSignOutError(error.message);
+    } on Exception {
+      _showSignOutError('No se pudo cerrar la sesión.');
+    }
+  }
+
+  void _showSignOutError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -371,6 +546,12 @@ class _HomePageState extends State<HomePage> {
                     backgroundColor: const Color(0xFFF0E6D8),
                     foregroundColor: _cocoa,
                   ),
+                ),
+                IconButton(
+                  key: const ValueKey('sign-out'),
+                  tooltip: 'Cerrar sesión',
+                  onPressed: _signOut,
+                  icon: const Icon(Icons.logout_rounded),
                 ),
               ],
             ),
@@ -982,7 +1163,7 @@ class _PrimaryButton extends StatelessWidget {
   const _PrimaryButton({required this.label, required this.onPressed});
 
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {

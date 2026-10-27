@@ -7,8 +7,11 @@ y solo pasa a `1` después de que Supabase confirma el `upsert`.
 ## Configuración
 
 1. Ejecuta `backend/supabase_schema.sql` en el SQL Editor de tu proyecto Supabase.
-2. En `frontend/horneaditos_app`, ejecuta `flutter pub get`.
-3. Inicializa el backend una vez, con las credenciales de tu proyecto en variables
+2. Ejecuta `backend/auth_policies.sql` después del script de esquema. Este quita
+   las políticas abiertas y permite crear el propio perfil solo con `rol=user`,
+   impidiendo que un usuario se promueva a admin desde la app.
+3. En `frontend/horneaditos_app`, ejecuta `flutter pub get`.
+4. Inicializa el backend una vez, con las credenciales de tu proyecto en variables
    de compilación (no las guardes en el repositorio):
 
 ```powershell
@@ -29,9 +32,31 @@ final backend = await HorneaditosBackend.initialize(
 );
 ```
 
-La app debe tener una sesión autenticada de Supabase antes de sincronizar o
-restaurar recetas. Al iniciar sesión en un dispositivo nuevo, llama
-`backend.restoreRecipesForCurrentUser()`. Ese método descarga las recetas del
+El registro usa Supabase Auth con correo, contraseña, nombre y apellido. Auth
+guarda la contraseña de forma segura; no se copia a SQLite. La tabla `users`
+recibe el id de Auth y sus metadatos, mientras rol y estado usan los valores
+predeterminados `user` y `activo`. Con la confirmación de correo desactivada, el
+registro inicia sesión inmediatamente. La sesión/JWT persistida por Supabase se
+restaura desde `currentSession`, por lo que un usuario con sesión guardada puede
+abrir la app sin conexión; el primer login o registro sí requiere conexión.
+Cerrar sesión elimina la sesión local.
+
+Para dar de alta al administrador inicial sin poner la contraseña en el código:
+regístralo una vez desde la app con el correo y nombre deseados (la contraseña
+se envía directamente a Supabase Auth), luego promueve su perfil en el SQL Editor:
+
+```sql
+UPDATE public.users
+SET rol = 'admin'
+WHERE correo = 'manuelgalindo009@gmail.com';
+```
+
+Comprueba que se actualizó exactamente una fila. No pongas la contraseña en SQL,
+archivos del repositorio ni variables persistentes. La fila debe existir primero
+por el registro en la app. Cierra y vuelve a iniciar sesión para refrescar el rol
+guardado en SQLite; la sesión actual no necesita invalidarse en Supabase.
+
+Al iniciar sesión en un dispositivo nuevo, la app restaura las recetas del
 usuario y las integra con SQLite sin reemplazar cambios locales pendientes.
 El servicio escucha cambios de conectividad y vuelve a intentar la cola local.
 El esquema remoto esperado es `public.users` y `public.foro`, con los nombres de
@@ -39,13 +64,10 @@ columnas del SQL. Antes de subir recetas, el backend crea o actualiza la fila de
 usuario en `public.users`, requerida por la clave foránea de `foro`. El usuario
 Supabase debe tener un correo, porque `public.users.correo` es obligatorio.
 Usa únicamente la clave pública `anon`/publishable; nunca la `service_role`.
-**Advertencia:** las políticas RLS del script compartido permiten cualquier
-operación sobre ambas tablas (`USING (true)` y `WITH CHECK (true)`), incluyendo
-solicitudes anónimas si los permisos de tabla también las autorizan. Esto no
-aísla los datos por usuario y no debería usarse así en producción.
-La pantalla de acceso actual sigue siendo una maqueta y aún no inicia sesión con
-Supabase Auth; la sincronización y restauración requieren una sesión real. El
-campo `imagen` conserva una ruta local y todavía no sube archivos a Supabase
+El script inicial que compartiste abría RLS en ambas tablas; por eso es necesario
+aplicar `auth_policies.sql` antes de usar cuentas reales. El acceso a recetas de
+foro queda público de lectura, y las escrituras exigen autenticación y propiedad.
+El campo `imagen` conserva una ruta local y todavía no sube archivos a Supabase
 Storage, por lo que esa imagen no se restaurará en otros dispositivos.
 
 ## API principal
@@ -68,7 +90,8 @@ operación en segundo plano. Si el dispositivo está desconectado o Supabase no
 está disponible, queda en la cola local con `sincronizado = 0`. `getRecipes`
 permite consultar el estado actualizado. `Recipe.create` genera el identificador
 UUID. Las recetas Supabase pertenecen al usuario autenticado y las políticas RLS
-del SQL compartido actualmente no limitan lectura ni escritura por propietario.
+de `auth_policies.sql` permiten lectura pública del foro y escritura solo al
+propietario autenticado.
 
 SQLite usa `sqflite`, por lo que este backend está preparado para Android, iOS y
 macOS; web, Windows y Linux requieren un adaptador de base de datos distinto.

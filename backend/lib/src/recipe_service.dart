@@ -30,6 +30,7 @@ class RecipeService {
     final currentUser = _client.auth.currentUser;
     if (currentUser != null) {
       await _database.cacheAuthenticatedUser(currentUser);
+      unawaited(_cacheAndRestoreUser(currentUser));
     }
     await _authSubscription?.cancel();
     _authSubscription = _client.auth.onAuthStateChange.listen(
@@ -112,7 +113,8 @@ class RecipeService {
     }
 
     try {
-      await _upsertRemoteUser(user);
+      final profile = await _upsertRemoteUser(user);
+      await _database.cacheRemoteUserProfile(profile);
     } on Exception catch (error, stackTrace) {
       developer.log(
         'No se pudo registrar el usuario remoto; no se subirán sus recetas.',
@@ -152,7 +154,8 @@ class RecipeService {
       );
     }
 
-    await _upsertRemoteUser(user);
+    final profile = await _upsertRemoteUser(user);
+    await _database.cacheRemoteUserProfile(profile);
 
     const pageSize = 1000;
     final rows = <Map<String, dynamic>>[];
@@ -208,7 +211,6 @@ class RecipeService {
   Future<void> _cacheAndRestoreUser(User user) async {
     await _cacheAuthenticatedUser(user);
     try {
-      await _upsertRemoteUser(user);
       await restoreRecipesForCurrentUser();
     } on Exception catch (error, stackTrace) {
       developer.log(
@@ -220,7 +222,7 @@ class RecipeService {
     }
   }
 
-  Future<void> _upsertRemoteUser(User user) async {
+  Future<Map<String, dynamic>> _upsertRemoteUser(User user) async {
     final email = user.email;
     if (email == null || email.isEmpty) {
       throw StateError(
@@ -230,12 +232,40 @@ class RecipeService {
     }
 
     final emailName = email.split('@').first;
-    await _client.from('users').upsert({
-      'id': user.id,
+    final values = {
       'nombre': user.userMetadata?['nombre'] as String? ?? emailName,
       'apellido': user.userMetadata?['apellido'] as String? ?? 'Usuario',
       'correo': email,
-    }, onConflict: 'id');
+    };
+    final existing = await _client
+        .from('users')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle();
+    if (existing != null) {
+      return _client
+          .from('users')
+          .update(values)
+          .eq('id', user.id)
+          .select('id,nombre,apellido,correo,rol,estado')
+          .single();
+    }
+
+    try {
+      return await _client
+          .from('users')
+          .insert({'id': user.id, ...values})
+          .select('id,nombre,apellido,correo,rol,estado')
+          .single();
+    } on PostgrestException catch (error) {
+      if (error.code != '23505') rethrow;
+      return _client
+          .from('users')
+          .update(values)
+          .eq('id', user.id)
+          .select('id,nombre,apellido,correo,rol,estado')
+          .single();
+    }
   }
 
   Future<bool> _hasNetworkConnection() async {
